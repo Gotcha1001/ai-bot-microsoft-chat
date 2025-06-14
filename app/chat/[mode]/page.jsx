@@ -420,6 +420,7 @@ export default function Chat() {
     const isMounted = useRef(false);
     const hasInitializedStream = useRef(false);
     const isRecognitionScheduled = useRef(false);
+    const recognitionTimeoutRef = useRef(null);
     const router = useRouter();
     const { mode } = useParams();
     const sessionIdRef = useRef(null);
@@ -455,7 +456,10 @@ export default function Chat() {
 
     const waitForVideo = () => {
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Video load timeout')), 15000);
+            const timeout = setTimeout(() => {
+                console.error('Video load timeout');
+                reject(new Error('Video load timeout'));
+            }, 15000);
             const checkVideo = () => {
                 if (!videoRef.current) {
                     clearTimeout(timeout);
@@ -463,21 +467,29 @@ export default function Chat() {
                     return;
                 }
                 if (videoRef.current.videoWidth && videoRef.current.videoHeight) {
+                    console.log('Video dimensions detected:', videoRef.current.videoWidth, videoRef.current.videoHeight);
                     clearTimeout(timeout);
                     resolve();
                 }
             };
             if (videoRef.current) {
-                videoRef.current.onloadedmetadata = checkVideo;
-                videoRef.current.oncanplay = checkVideo;
+                videoRef.current.onloadedmetadata = () => {
+                    console.log('Video metadata loaded');
+                    checkVideo();
+                };
+                videoRef.current.oncanplay = () => {
+                    console.log('Video can play');
+                    checkVideo();
+                };
                 videoRef.current.onerror = () => {
+                    console.error('Video element error');
                     clearTimeout(timeout);
                     reject(new Error('Video load error'));
                 };
                 checkVideo();
                 if (videoRef.current.paused) {
                     videoRef.current.play().catch(err => {
-                        console.error('Video play error:', err);
+                        console.error('Video play error:', err.name, err.message);
                         clearTimeout(timeout);
                         reject(err);
                     });
@@ -514,10 +526,10 @@ export default function Chat() {
                 console.log('hasPermissions set to true');
                 return true;
             } catch (err) {
-                console.error(`Permission error (attempt ${i + 1} of ${retries}):`, err.name, err.message, err);
+                console.error(`Permission error (attempt ${i + 1} of ${retries}):`, err.name, err.message);
                 if (i === retries - 1) {
                     if (err.name === 'NotAllowedError') {
-                        setStatus('Permissions denied. Please allow microphone and camera access in your browser settings.');
+                        setStatus('Permissions denied. Please allow microphone and camera access in browser settings.');
                     } else if (err.name === 'NotFoundError') {
                         setStatus('No microphone or camera found. Please ensure devices are connected.');
                     } else {
@@ -551,7 +563,7 @@ export default function Chat() {
 
         const initializeApp = async () => {
             console.log('Initializing app for mode:', mode);
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Delay for mobile
+            await new Promise(resolve => setTimeout(resolve, 2000)); // MOBILE FIX 2025-06-14: Increased delay
             const permissionsGranted = await requestPermissions();
             if (!permissionsGranted) {
                 console.log('Permissions not granted, stopping initialization.');
@@ -576,6 +588,7 @@ export default function Chat() {
         return () => {
             isMounted.current = false;
             clearTimeout(timer);
+            clearTimeout(recognitionTimeoutRef.current);
             hasInitializedStream.current = false;
             if (recognitionRef.current) recognitionRef.current.stop();
             if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
@@ -610,7 +623,7 @@ export default function Chat() {
         try {
             console.log('Starting stream initialization for mode:', mode);
 
-            // Enumerate devices to debug camera selection
+            // Enumerate devices
             const devices = await navigator.mediaDevices.enumerateDevices();
             const videoDevices = devices.filter(device => device.kind === 'videoinput');
             console.log('Available video devices:', videoDevices);
@@ -648,12 +661,12 @@ export default function Chat() {
                 }
                 console.log('Desktop audio track settings:', stream.getAudioTracks()[0]?.getSettings());
             } else {
-                const constraints = {
-                    video: { facingMode: 'user' }, // Force front-facing camera
+                let constraints = {
+                    video: true, // MOBILE FIX 2025-06-14: Simplified for mobile
                     audio: {
                         sampleRate: isMobile ? 16000 : 44100,
-                        echoCancellation: true,
-                        noiseSuppression: true,
+                        echoCancellation: false, // Relaxed for mobile
+                        noiseSuppression: false,
                         autoGainControl: false,
                     },
                 };
@@ -662,14 +675,13 @@ export default function Chat() {
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
                     console.log('Camera stream acquired:', stream.getVideoTracks(), stream.getAudioTracks());
                 } catch (streamErr) {
-                    console.error('Failed to acquire camera stream:', streamErr.name, streamErr.message, streamErr);
-                    // Fallback to minimal constraints
+                    console.error('Failed to acquire camera stream:', streamErr.name, streamErr.message);
                     console.log('Trying fallback constraints: { video: { width: 640, height: 480 }, audio: {...} }');
-                    const fallbackConstraints = {
+                    constraints = {
                         video: { width: 640, height: 480 },
                         audio: constraints.audio,
                     };
-                    stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                    stream = await navigator.mediaDevices.getUserMedia(constraints);
                     console.log('Fallback camera stream acquired:', stream.getVideoTracks(), stream.getAudioTracks());
                 }
                 console.log('Camera audio track settings:', stream.getAudioTracks()[0]?.getSettings());
@@ -681,14 +693,14 @@ export default function Chat() {
                 videoRef.current.muted = true;
                 videoRef.current.volume = 0;
                 videoRef.current.playsInline = true;
+                videoRef.current.autoplay = true;
                 try {
                     await videoRef.current.play();
                     console.log('Video stream started successfully.');
                 } catch (playErr) {
-                    console.error('Video play error:', playErr.name, playErr.message, playErr);
-                    // Retry playback
-                    console.log('Retrying video playback after 500ms...');
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    console.error('Video play error:', playErr.name, playErr.message);
+                    console.log('Retrying video playback after 1500ms...');
+                    await new Promise(resolve => setTimeout(resolve, 1500));
                     await videoRef.current.play();
                     console.log('Video stream started successfully after retry.');
                 }
@@ -700,7 +712,8 @@ export default function Chat() {
                 await waitForVideo();
                 console.log('Video loaded successfully.');
             } catch (waitErr) {
-                console.error('Wait for video error:', waitErr.name, waitErr.message, waitErr);
+                console.error('Wait for video error:', waitErr.name, waitErr.message);
+                setStatus('Failed to load video stream.');
                 throw waitErr;
             }
             canvasRef.current = document.createElement('canvas');
@@ -708,7 +721,7 @@ export default function Chat() {
             console.log('Stream initialization complete, starting recognition.');
             setTimeout(() => startRecognition(), 1000);
         } catch (err) {
-            console.error(`${mode} access error:`, err.name, err.message, err);
+            console.error(`${mode} access error:`, err.name, err.message);
             hasInitializedStream.current = false;
             setStatus(`Failed to access ${mode}: ${err.message}`);
         }
@@ -722,9 +735,9 @@ export default function Chat() {
             return;
         }
         recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = false;
+        recognitionRef.current.continuous = isMobile ? true : false; // MOBILE FIX 2025-06-14: Continuous for mobile
         recognitionRef.current.interimResults = isMobile ? true : false;
-        recognitionRef.current.lang = 'en-US';
+        recognitionRef.current.lang = isMobile ? navigator.language || 'en-US' : 'en-US'; // Fallback to device locale
         if (isMobile) recognitionRef.current.maxAlternatives = 1;
 
         recognitionRef.current.onstart = () => {
@@ -732,11 +745,18 @@ export default function Chat() {
                 console.log('Speech recognition started.');
                 setIsRecognitionRunning(true);
                 setStatus('🎤 Listening for speech...');
+                if (isMobile) {
+                    recognitionTimeoutRef.current = setTimeout(() => {
+                        console.log('Speech recognition timeout, restarting...');
+                        recognitionRef.current?.stop();
+                    }, 8000); // MOBILE FIX 2025-06-14: Shorter timeout
+                }
             }
         };
 
         recognitionRef.current.onresult = async (event) => {
             console.log('Speech recognition result:', event.results);
+            clearTimeout(recognitionTimeoutRef.current);
             if (isProcessing || !isMounted.current) return;
             setIsProcessing(true);
             const prompt = event.results[event.results.length - 1][0].transcript.trim();
@@ -755,7 +775,7 @@ export default function Chat() {
                 canvasRef.current.width = Math.min(videoRef.current?.videoWidth || 640, 640);
                 canvasRef.current.height = Math.min(videoRef.current?.videoHeight || 360, 360);
                 context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
-                imageData = canvasRef.current.toDataURL('image/jpeg', isMobile ? 0.3 : 0.6); // Lower quality for mobile
+                imageData = canvasRef.current.toDataURL('image/jpeg', isMobile ? 0.3 : 0.6);
                 console.log('Captured image data size:', imageData.length);
             } catch (err) {
                 console.error('Frame capture error:', err);
@@ -773,6 +793,7 @@ export default function Chat() {
                 let data;
                 while (retries < maxRetries) {
                     try {
+                        console.log('Sending API request to /api/process-audio');
                         const res = await fetch('/api/process-audio', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -786,9 +807,11 @@ export default function Chat() {
                         });
                         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                         data = await res.json();
+                        console.log('API response:', data);
                         break;
                     } catch (err) {
                         retries++;
+                        console.error(`API retry ${retries}/${maxRetries}:`, err);
                         if (retries === maxRetries) throw err;
                         await new Promise(resolve => setTimeout(resolve, 1000 * retries));
                     }
@@ -819,10 +842,12 @@ export default function Chat() {
                                 setTimeout(() => startRecognition(), 1000);
                             }
                         };
+                        console.log('Speaking response:', data.response);
                         window.speechSynthesis.speak(utterance);
                     }, 200);
                 }
             } catch (err) {
+                console.error('API processing error:', err);
                 setStatus(`Error processing audio: ${err.message}`);
                 if (isMounted.current) setTimeout(() => startRecognition(), 1000);
             }
@@ -830,6 +855,7 @@ export default function Chat() {
         };
 
         recognitionRef.current.onerror = (event) => {
+            clearTimeout(recognitionTimeoutRef.current);
             if (isMounted.current) {
                 console.error('Speech recognition error:', event.error, event.message);
                 setStatus(`Speech recognition error: ${event.error}`);
@@ -845,6 +871,7 @@ export default function Chat() {
         };
 
         recognitionRef.current.onend = () => {
+            clearTimeout(recognitionTimeoutRef.current);
             console.log('Speech recognition ended.');
             if (isMounted.current) {
                 setIsRecognitionRunning(false);
@@ -891,6 +918,7 @@ export default function Chat() {
 
     async function stopStream() {
         window.speechSynthesis.cancel();
+        clearTimeout(recognitionTimeoutRef.current);
         if (recognitionRef.current) {
             recognitionRef.current.stop();
             setIsRecognitionRunning(false);
