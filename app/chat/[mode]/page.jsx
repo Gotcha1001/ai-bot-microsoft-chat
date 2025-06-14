@@ -551,6 +551,7 @@ export default function Chat() {
 
         const initializeApp = async () => {
             console.log('Initializing app for mode:', mode);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Delay for mobile
             const permissionsGranted = await requestPermissions();
             if (!permissionsGranted) {
                 console.log('Permissions not granted, stopping initialization.');
@@ -648,7 +649,7 @@ export default function Chat() {
                 console.log('Desktop audio track settings:', stream.getAudioTracks()[0]?.getSettings());
             } else {
                 const constraints = {
-                    video: true,
+                    video: { facingMode: 'user' }, // Force front-facing camera
                     audio: {
                         sampleRate: isMobile ? 16000 : 44100,
                         echoCancellation: true,
@@ -662,7 +663,14 @@ export default function Chat() {
                     console.log('Camera stream acquired:', stream.getVideoTracks(), stream.getAudioTracks());
                 } catch (streamErr) {
                     console.error('Failed to acquire camera stream:', streamErr.name, streamErr.message, streamErr);
-                    throw streamErr;
+                    // Fallback to minimal constraints
+                    console.log('Trying fallback constraints: { video: { width: 640, height: 480 }, audio: {...} }');
+                    const fallbackConstraints = {
+                        video: { width: 640, height: 480 },
+                        audio: constraints.audio,
+                    };
+                    stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+                    console.log('Fallback camera stream acquired:', stream.getVideoTracks(), stream.getAudioTracks());
                 }
                 console.log('Camera audio track settings:', stream.getAudioTracks()[0]?.getSettings());
             }
@@ -678,7 +686,11 @@ export default function Chat() {
                     console.log('Video stream started successfully.');
                 } catch (playErr) {
                     console.error('Video play error:', playErr.name, playErr.message, playErr);
-                    throw playErr;
+                    // Retry playback
+                    console.log('Retrying video playback after 500ms...');
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    await videoRef.current.play();
+                    console.log('Video stream started successfully after retry.');
                 }
             } else {
                 console.error('Video element not found.');
@@ -743,14 +755,14 @@ export default function Chat() {
                 canvasRef.current.width = Math.min(videoRef.current?.videoWidth || 640, 640);
                 canvasRef.current.height = Math.min(videoRef.current?.videoHeight || 360, 360);
                 context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
-                imageData = canvasRef.current.toDataURL('image/jpeg', isMobile ? 0.4 : 0.6);
-                // Debug: Log image data size to ensure valid capture
+                imageData = canvasRef.current.toDataURL('image/jpeg', isMobile ? 0.3 : 0.6); // Lower quality for mobile
                 console.log('Captured image data size:', imageData.length);
             } catch (err) {
                 console.error('Frame capture error:', err);
             }
-            if (!imageData) {
-                setStatus('Failed to capture frame.');
+            if (!imageData || imageData.length < 5000) {
+                console.warn('Invalid or empty image data captured.');
+                setStatus('Failed to capture valid frame.');
                 setIsProcessing(false);
                 if (isMounted.current) setTimeout(() => startRecognition(), 1000);
                 return;
