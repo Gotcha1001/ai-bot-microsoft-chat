@@ -1815,6 +1815,9 @@ export default function Chat() {
     const [chatHistory, setChatHistory] = useState([]);
     const [isMobile, setIsMobile] = useState(false);
     const [browserWarning, setBrowserWarning] = useState('');
+    const [lastTranscript, setLastTranscript] = useState('');
+    const [lastError, setLastError] = useState('');
+    const [imageCaptureStatus, setImageCaptureStatus] = useState('');
 
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
@@ -1828,7 +1831,18 @@ export default function Chat() {
     const { mode } = useParams();
     const sessionIdRef = useRef(null);
 
-    // Initialize app - simplified
+    const checkCurrentPermissions = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach(track => track.stop());
+            return true;
+        } catch (err) {
+            console.error('Permission check failed:', err);
+            setLastError(`Permission check failed: ${err.message}`);
+            return false;
+        }
+    };
+
     const initializeApp = async () => {
         if (isInitializing.current) {
             console.log('Initialization already in progress, skipping...');
@@ -1839,12 +1853,17 @@ export default function Chat() {
         console.log('Initializing app for mode:', mode);
 
         try {
+            const hasMicAccess = await checkCurrentPermissions();
+            if (!hasMicAccess) {
+                throw new Error('Microphone access denied. Please allow microphone permissions.');
+            }
             await initializeStream();
             setupSpeechRecognition();
             setStatus('✅ Ready to listen');
         } catch (error) {
             console.error('Initialization failed:', error);
             setStatus(`❌ Setup failed: ${error.message}`);
+            setLastError(`Initialization failed: ${error.message}`);
         }
 
         isInitializing.current = false;
@@ -1888,9 +1907,12 @@ export default function Chat() {
 
         const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
         const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+        const isSamsungBrowser = /SamsungBrowser/i.test(navigator.userAgent);
 
         if (isIOS && isSafari) {
             setBrowserWarning('For best speech recognition on iOS, please use Chrome instead of Safari');
+        } else if (isSamsungBrowser) {
+            setBrowserWarning('Samsung Browser may have speech recognition issues. For best results, use Chrome or Firefox.');
         } else if (isMobileDevice && !window.webkitSpeechRecognition && !window.SpeechRecognition) {
             setBrowserWarning('Speech recognition not supported. Please use Chrome, Edge, or Firefox');
         }
@@ -1907,10 +1929,29 @@ export default function Chat() {
         return () => window.removeEventListener('resize', checkMobile);
     }, [mode, router]);
 
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden && isRecognitionRunning) {
+                console.log('Page hidden, stopping recognition');
+                if (recognitionRef.current) {
+                    recognitionRef.current.stop();
+                    setIsRecognitionRunning(false);
+                }
+            } else if (!document.hidden && !isRecognitionRunning && !isProcessing) {
+                console.log('Page visible again, restarting recognition');
+                setTimeout(() => startRecognition(), 1000);
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [isRecognitionRunning, isProcessing]);
+
     const checkSpeechSupport = () => {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SpeechRecognition) {
             console.error('Speech recognition not supported');
+            setLastError('Speech recognition not supported');
             return false;
         }
         return true;
@@ -1920,12 +1961,14 @@ export default function Chat() {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 console.error('Video load timeout');
+                setLastError('Video load timeout');
                 reject(new Error('Video load timeout'));
             }, 10000);
 
             const checkVideo = () => {
                 if (!videoRef.current) {
                     clearTimeout(timeout);
+                    setLastError('Video element not found');
                     reject(new Error('Video element not found'));
                     return;
                 }
@@ -1941,6 +1984,7 @@ export default function Chat() {
                 videoRef.current.oncanplay = checkVideo;
                 videoRef.current.onerror = () => {
                     clearTimeout(timeout);
+                    setLastError('Video load error');
                     reject(new Error('Video load error'));
                 };
 
@@ -1951,6 +1995,7 @@ export default function Chat() {
                     if (playPromise !== undefined) {
                         playPromise.catch((err) => {
                             console.error('Video play error:', err);
+                            setLastError(`Video play error: ${err.message}`);
                             clearTimeout(timeout);
                             reject(err);
                         });
@@ -1958,19 +2003,25 @@ export default function Chat() {
                 }
             } else {
                 clearTimeout(timeout);
+                setLastError('Video element not found');
                 reject(new Error('Video element not found'));
             }
         });
     };
 
     const processTranscript = async (transcript) => {
-        if (isProcessing || !isMounted.current) return;
+        if (isProcessing || !isMounted.current) {
+            console.log('Skipping processTranscript: processing or unmounted');
+            return;
+        }
 
         setIsProcessing(true);
         console.log('Processing transcript:', transcript);
+        setLastTranscript(transcript);
 
         if (!transcript || transcript.length < 2) {
             setStatus('⚠️ Speech too short, please try again.');
+            setLastError('Speech too short');
             setIsProcessing(false);
             setTimeout(() => startRecognition(), 1000);
             return;
@@ -1987,13 +2038,21 @@ export default function Chat() {
             context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
             imageData = canvasRef.current.toDataURL('image/jpeg', isMobile ? 0.3 : 0.6);
             console.log('Image data captured, length:', imageData.length);
+            setImageCaptureStatus(`Captured, length: ${imageData.length}`);
         } catch (err) {
             console.error('Frame capture error:', err);
+            setLastError(`Frame capture error: ${err.message}`);
+            setImageCaptureStatus('Failed');
             imageData = null;
         }
 
-        if (!imageData || imageData.length < 5000) {
-            setStatus('❌ Failed to capture valid frame.');
+        // Allow processing without imageData in desktop mode
+        if (mode === 'desktop' && !imageData) {
+            console.log('Proceeding without imageData in desktop mode');
+            setImageCaptureStatus('Skipped for desktop mode');
+        } else if (!imageData || imageData?.length < 5000) {
+            setStatus('⚠️ Invalid frame capture, retrying...');
+            setLastError('Invalid frame capture');
             setIsProcessing(false);
             setTimeout(() => startRecognition(), 1000);
             return;
@@ -2024,6 +2083,7 @@ export default function Chat() {
                 } catch (err) {
                     retries++;
                     console.error(`API retry ${retries}/${maxRetries}:`, err);
+                    setLastError(`API retry ${retries}/${maxRetries}: ${err.message}`);
                     if (retries === maxRetries) throw err;
                     await new Promise((resolve) => setTimeout(resolve, 1000 * retries));
                 }
@@ -2031,6 +2091,7 @@ export default function Chat() {
 
             if (data.error) {
                 setStatus(data.error);
+                setLastError(data.error);
                 setTimeout(() => startRecognition(), 1000);
             } else {
                 const newHistory = [...chatHistory, { prompt: transcript, response: data.response }].slice(-10);
@@ -2054,6 +2115,7 @@ export default function Chat() {
 
                     utterance.onerror = (e) => {
                         console.error('Speech synthesis error:', e);
+                        setLastError(`Speech synthesis error: ${e.message}`);
                         if (isMounted.current) {
                             setTimeout(() => startRecognition(), 1000);
                         }
@@ -2065,6 +2127,7 @@ export default function Chat() {
         } catch (err) {
             console.error('API processing error:', err);
             setStatus(`❌ Error processing audio: ${err.message}`);
+            setLastError(`API processing error: ${err.message}`);
             setTimeout(() => startRecognition(), 1000);
         }
 
@@ -2081,11 +2144,12 @@ export default function Chat() {
         recognitionRef.current = new SpeechRecognition();
 
         recognitionRef.current.continuous = false;
-        recognitionRef.current.interimResults = true;
+        recognitionRef.current.interimResults = isMobile ? false : true;
         recognitionRef.current.lang = navigator.language || 'en-US';
         recognitionRef.current.maxAlternatives = 1;
 
-        const timeoutDuration = isMobile ? 8000 : 7000; // Longer timeout for mobile
+        const isSamsungBrowser = /SamsungBrowser/i.test(navigator.userAgent);
+        const timeoutDuration = isMobile ? (isSamsungBrowser ? 10000 : 8000) : 7000;
 
         recognitionRef.current.onstart = () => {
             if (isMounted.current) {
@@ -2130,21 +2194,20 @@ export default function Chat() {
             }
 
             console.log('Transcript:', transcript, 'isFinal:', isFinal);
+            setLastTranscript(transcript);
 
-            // On mobile, process both interim and final results
-            if (isMobile && transcript.trim() && (isFinal || transcript.length > 5)) {
+            if (transcript.trim()) {
                 setStatus(`👂 Processing: "${transcript}"`);
                 processTranscript(transcript.trim());
-                return;
-            }
-
-            if (!isMobile && isFinal && transcript.trim()) {
-                processTranscript(transcript.trim());
+            } else {
+                setLastError('Empty or invalid transcript');
+                setTimeout(() => startRecognition(), 1000);
             }
         };
 
         recognitionRef.current.onerror = (event) => {
             console.error('Speech recognition error:', event.error, event);
+            setLastError(`Speech recognition error: ${event.error}`);
 
             if (recognitionTimeoutRef.current) {
                 clearTimeout(recognitionTimeoutRef.current);
@@ -2166,7 +2229,15 @@ export default function Chat() {
                         setTimeout(() => startRecognition(), 1000);
                         break;
                     case 'audio-capture':
-                        setStatus('❌ Microphone not working. Check your device settings.');
+                        setStatus('❌ Microphone not working. Checking permissions...');
+                        setTimeout(async () => {
+                            const hasMicAccess = await checkCurrentPermissions();
+                            if (hasMicAccess) {
+                                startRecognition();
+                            } else {
+                                setStatus('❌ Microphone access denied. Please refresh and allow permissions.');
+                            }
+                        }, 2000);
                         break;
                     case 'service-not-allowed':
                         setStatus('❌ Speech service blocked. Try refreshing the page.');
@@ -2194,7 +2265,6 @@ export default function Chat() {
             }
         };
 
-        // Auto-start recognition after setup
         setTimeout(() => startRecognition(), 500);
     };
 
@@ -2210,9 +2280,13 @@ export default function Chat() {
 
             if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
             const data = await res.json();
-            if (data.error) setStatus(`❌ Failed to start stream: ${data.error}`);
+            if (data.error) {
+                setStatus(`❌ Failed to start stream: ${data.error}`);
+                setLastError(`Failed to start stream: ${data.error}`);
+            }
         } catch (err) {
             setStatus(`❌ Error starting stream: ${err.message}`);
+            setLastError(`Error starting stream: ${err.message}`);
             console.error('Start stream error:', err);
         }
     }
@@ -2277,6 +2351,7 @@ export default function Chat() {
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
                 } catch (err) {
                     console.error('Initial stream failed, trying fallback:', err);
+                    setLastError(`Initial stream failed: ${err.message}`);
                     const fallbackConstraints = {
                         video: { width: 320, height: 240, facingMode: 'user' },
                         audio: { sampleRate: 16000, echoCancellation: true },
@@ -2302,12 +2377,14 @@ export default function Chat() {
                     console.log('Video dimensions:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
                 } catch (err) {
                     console.error('Video play error:', err);
+                    setLastError(`Video play error: ${err.message}`);
                     await new Promise((resolve) => setTimeout(resolve, 1000));
                     try {
                         await videoRef.current.play();
                         console.log('Second play attempt succeeded, dimensions:', videoRef.current.videoWidth, 'x', videoRef.current.videoHeight);
                     } catch (secondErr) {
                         console.error('Second video play attempt failed:', secondErr);
+                        setLastError(`Second video play attempt failed: ${secondErr.message}`);
                         throw new Error('Failed to play video stream');
                     }
                 }
@@ -2323,6 +2400,7 @@ export default function Chat() {
         } catch (err) {
             console.error(`Stream initialization error:`, err);
             setStatus(`❌ Failed to access ${mode}: ${err.message}. Please refresh and allow permissions.`);
+            setLastError(`Stream initialization error: ${err.message}`);
         }
     }
 
@@ -2330,15 +2408,16 @@ export default function Chat() {
         if (!recognitionRef.current || isProcessing || !isMounted.current) {
             console.log('Cannot start recognition:', {
                 hasRecognition: !!recognitionRef.current,
-                isRecognitionRunning: isRecognitionRunning,
-                isProcessing: isProcessing,
-                isMounted: isMounted.current
+                isRecognitionRunning,
+                isProcessing,
+                isMounted: isMounted.current,
             });
+            setLastError('Cannot start recognition: missing requirements');
             return;
         }
 
         try {
-            setIsRecognitionRunning(false); // Reset state
+            setIsRecognitionRunning(false);
 
             if (document.hidden) {
                 setStatus('Page is hidden, delaying recognition...');
@@ -2351,6 +2430,7 @@ export default function Chat() {
         } catch (e) {
             console.error('Recognition start error:', e);
             setStatus(`Failed to start recognition: ${e.message}`);
+            setLastError(`Recognition start error: ${e.message}`);
             setIsRecognitionRunning(false);
             setTimeout(() => startRecognition(), 2000);
         }
@@ -2389,6 +2469,7 @@ export default function Chat() {
             }
         } catch (err) {
             setStatus(`❌ Error stopping stream: ${err.message}`);
+            setLastError(`Error stopping stream: ${err.message}`);
         }
     }
 
@@ -2406,6 +2487,9 @@ export default function Chat() {
             isRecognitionRunning,
             isProcessing,
             browserWarning,
+            lastTranscript,
+            lastError,
+            imageCaptureStatus,
         };
 
         console.log('Debug Info:', debugInfo);
