@@ -68,15 +68,15 @@
 //     </div>
 //   );
 // }
+'use client';
 
-"use client";
-
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
-  const [response, setResponse] = useState("");
+  const [response, setResponse] = useState('');
   const [isMobile, setIsMobile] = useState(false);
+  const [browserWarning, setBrowserWarning] = useState(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -86,42 +86,41 @@ export default function Home() {
           navigator.userAgent
         ) ||
         window.innerWidth <= 768 ||
-        "ontouchstart" in window;
+        'ontouchstart' in window;
       setIsMobile(isMobileDevice);
+
+      // Check for iOS and Safari
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isIOS && isSafari) {
+        setBrowserWarning(
+          <div className="mt-4 p-3 bg-orange-600 bg-opacity-70 rounded-lg">
+            <p className="text-sm">
+              ⚠️ For best results on iOS, please use Chrome instead of Safari
+            </p>
+          </div>
+        );
+      }
     };
+
     checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const showBrowserWarning = () => {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    if (isIOS && isSafari) {
-      return (
-        <div className="mt-4 p-3 bg-orange-600 bg-opacity-70 rounded-lg">
-          <p className="text-sm">
-            ⚠️ For best results on iOS, please use Chrome instead of Safari
-          </p>
-        </div>
-      );
-    }
-    return null;
-  };
-
   function startStream(mode) {
-    setResponse("");
-    if (isMobile && mode === "desktop") {
+    setResponse('');
+    if (isMobile && mode === 'desktop') {
       setResponse(
-        "Desktop mode not available on mobile. Redirecting to camera mode..."
+        'Desktop mode not available on mobile. Redirecting to camera mode...'
       );
-      setTimeout(() => startStream("camera"), 2000);
+      setTimeout(() => startStream('camera'), 2000);
       return;
     }
 
-    fetch("/api/start-stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    fetch('/api/start-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode }),
     })
       .then((res) => res.json())
@@ -135,7 +134,7 @@ export default function Home() {
         }
       })
       .catch((err) => {
-        setResponse("Error starting stream: " + err.message);
+        setResponse('Error starting stream: ' + err.message);
       });
   }
 
@@ -149,33 +148,33 @@ export default function Home() {
           </span>
         )}
       </h1>
-      {showBrowserWarning()}
+      {browserWarning}
       <img
         src="/image.jpeg"
         alt="AI Assistant"
         className="w-full h-64 object-cover rounded-lg mb-6"
       />
       <p className="mb-6">
-        Experience our AI-powered assistant that can analyze your{" "}
-        {isMobile ? "camera" : "desktop or camera"} feed.
+        Experience our AI-powered assistant that can analyze your{' '}
+        {isMobile ? 'camera' : 'desktop or camera'} feed.
         {isMobile
-          ? " Camera mode optimized for mobile."
-          : " Choose your mode below and interact via voice commands."}
+          ? ' Camera mode optimized for mobile.'
+          : ' Choose your mode below and interact via voice commands.'}
       </p>
       <div className="flex justify-center space-x-4 flex-wrap">
         {!isMobile && (
           <button
-            onClick={() => startStream("desktop")}
+            onClick={() => startStream('desktop')}
             className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 mb-2"
           >
             Desktop Mode
           </button>
         )}
         <button
-          onClick={() => startStream("camera")}
+          onClick={() => startStream('camera')}
           className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 mb-2"
         >
-          {isMobile ? "Start Camera" : "Camera Mode"}
+          {isMobile ? 'Start Camera' : 'Camera Mode'}
         </button>
         <a
           href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"
