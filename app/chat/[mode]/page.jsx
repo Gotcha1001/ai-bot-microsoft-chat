@@ -1640,37 +1640,65 @@ export default function Chat() {
         }
     }
 
+    // function startRecognition() {
+    //     if (!recognitionRef.current || isRecognitionRunning || isProcessing || !isMounted.current || !hasPermissions) {
+    //         console.log('Cannot start recognition:', {
+    //             hasRecognition: !!recognitionRef.current,
+    //             isRecognitionRunning,
+    //             isProcessing,
+    //             isMounted: isMounted.current,
+    //             hasPermissions,
+    //         });
+    //         return;
+    //     }
+
+    //     try {
+    //         console.log('Starting speech recognition...');
+    //         if (document.hidden) {
+    //             console.log('Page is hidden, delaying recognition start');
+    //             setTimeout(() => startRecognition(), 2000);
+    //             return;
+    //         }
+    //         recognitionRef.current.start();
+    //     } catch (e) {
+    //         console.error('Recognition start error:', e);
+    //         if (e.name === 'InvalidStateError') {
+    //             console.log('Recognition already running, stopping first...');
+    //             recognitionRef.current.stop();
+    //             setTimeout(() => startRecognition(), 1000);
+    //         } else {
+    //             setStatus(`❌ Failed to start recognition: ${e.message}`);
+    //             setIsRecognitionRunning(false);
+    //             setTimeout(() => startRecognition(), 2000);
+    //         }
+    //     }
+    // }
+
     function startRecognition() {
         if (!recognitionRef.current || isRecognitionRunning || isProcessing || !isMounted.current || !hasPermissions) {
-            console.log('Cannot start recognition:', {
-                hasRecognition: !!recognitionRef.current,
-                isRecognitionRunning,
-                isProcessing,
-                isMounted: isMounted.current,
-                hasPermissions,
-            });
+            setStatus(`Cannot start recognition: {
+            hasRecognition: ${!!recognitionRef.current},
+            isRecognitionRunning: ${isRecognitionRunning},
+            isProcessing: ${isProcessing},
+            isMounted: ${isMounted.current},
+            hasPermissions: ${hasPermissions}
+        }`);
             return;
         }
-
         try {
-            console.log('Starting speech recognition...');
+            console.log('Starting speech recognition...'); // Remove or replace with UI log if needed
             if (document.hidden) {
-                console.log('Page is hidden, delaying recognition start');
+                setStatus('Page is hidden, delaying recognition...');
                 setTimeout(() => startRecognition(), 2000);
                 return;
             }
             recognitionRef.current.start();
+            setIsRecognitionRunning(true);
+            setStatus('🎤 Listening... Speak now!');
         } catch (e) {
-            console.error('Recognition start error:', e);
-            if (e.name === 'InvalidStateError') {
-                console.log('Recognition already running, stopping first...');
-                recognitionRef.current.stop();
-                setTimeout(() => startRecognition(), 1000);
-            } else {
-                setStatus(`❌ Failed to start recognition: ${e.message}`);
-                setIsRecognitionRunning(false);
-                setTimeout(() => startRecognition(), 2000);
-            }
+            setStatus(`Failed to start recognition: ${e.message}`);
+            setIsRecognitionRunning(false);
+            setTimeout(() => startRecognition(), 2000);
         }
     }
 
