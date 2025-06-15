@@ -94,6 +94,21 @@ export default function Home() {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  const showBrowserWarning = () => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isIOS && isSafari) {
+      return (
+        <div className="mt-4 p-3 bg-orange-600 bg-opacity-70 rounded-lg">
+          <p className="text-sm">
+            ⚠️ For best results on iOS, please use Chrome instead of Safari
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
   function startStream(mode) {
     setResponse("");
     if (isMobile && mode === "desktop") {
@@ -134,6 +149,7 @@ export default function Home() {
           </span>
         )}
       </h1>
+      {showBrowserWarning()}
       <img
         src="/image.jpeg"
         alt="AI Assistant"
@@ -150,14 +166,14 @@ export default function Home() {
         {!isMobile && (
           <button
             onClick={() => startStream("desktop")}
-            className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2"
+            className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 mb-2"
           >
             Desktop Mode
           </button>
         )}
         <button
           onClick={() => startStream("camera")}
-          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2"
+          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 mb-2"
         >
           {isMobile ? "Start Camera" : "Camera Mode"}
         </button>
@@ -165,7 +181,7 @@ export default function Home() {
           href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"
           target="_blank"
           rel="noopener noreferrer"
-          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2"
+          className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition duration-300 mb-2"
         >
           Watch AI Video Launch
         </a>
