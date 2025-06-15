@@ -98,7 +98,7 @@ export default function Home() {
     setResponse("");
     if (isMobile && mode === "desktop") {
       setResponse(
-        "Desktop mode is not available on mobile. Redirecting to camera mode..."
+        "Desktop mode not available on mobile. Redirecting to camera mode..."
       );
       setTimeout(() => startStream("camera"), 2000);
       return;

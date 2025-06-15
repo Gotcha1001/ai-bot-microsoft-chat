@@ -411,7 +411,6 @@ export default function Chat() {
     const [chatHistory, setChatHistory] = useState([]);
     const [isMobile, setIsMobile] = useState(false);
     const [hasPermissions, setHasPermissions] = useState(false);
-    const [showScreenSharePrompt, setShowScreenSharePrompt] = useState(false);
 
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
@@ -421,21 +420,18 @@ export default function Chat() {
     const hasInitializedStream = useRef(false);
     const isRecognitionScheduled = useRef(false);
     const recognitionTimeoutRef = useRef(null);
+    const isInitializing = useRef(false);
+
     const router = useRouter();
     const { mode } = useParams();
     const sessionIdRef = useRef(null);
 
-    useEffect(() => {
-        if (mode === 'desktop') {
-            setShowScreenSharePrompt(true);
-        }
-    }, [mode]);
-
+    // Detect mobile devices
     useEffect(() => {
         const checkMobile = () => {
-            const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-                window.innerWidth <= 768 ||
-                ('ontouchstart' in window);
+            const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+                navigator.userAgent
+            ) || window.innerWidth <= 768 || 'ontouchstart' in window;
             setIsMobile(isMobileDevice);
             if (isMobileDevice && mode === 'desktop') {
                 setStatus('Desktop mode not supported on mobile. Switching to camera mode...');
@@ -447,19 +443,13 @@ export default function Chat() {
         return () => window.removeEventListener('resize', checkMobile);
     }, [mode, router]);
 
-    useEffect(() => {
-        if (hasPermissions && mode && !isRecognitionRunning && !isProcessing) {
-            console.log('hasPermissions changed to true, triggering startRecognition.');
-            setTimeout(() => startRecognition(), 1000);
-        }
-    }, [hasPermissions, mode, isRecognitionRunning, isProcessing]);
-
+    // Wait for video to be ready
     const waitForVideo = () => {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 console.error('Video load timeout');
                 reject(new Error('Video load timeout'));
-            }, 15000);
+            }, 10000);
             const checkVideo = () => {
                 if (!videoRef.current) {
                     clearTimeout(timeout);
@@ -467,29 +457,21 @@ export default function Chat() {
                     return;
                 }
                 if (videoRef.current.videoWidth && videoRef.current.videoHeight) {
-                    console.log('Video dimensions detected:', videoRef.current.videoWidth, videoRef.current.videoHeight);
                     clearTimeout(timeout);
                     resolve();
                 }
             };
             if (videoRef.current) {
-                videoRef.current.onloadedmetadata = () => {
-                    console.log('Video metadata loaded');
-                    checkVideo();
-                };
-                videoRef.current.oncanplay = () => {
-                    console.log('Video can play');
-                    checkVideo();
-                };
+                videoRef.current.onloadedmetadata = checkVideo;
+                videoRef.current.oncanplay = checkVideo;
                 videoRef.current.onerror = () => {
-                    console.error('Video element error');
                     clearTimeout(timeout);
                     reject(new Error('Video load error'));
                 };
                 checkVideo();
                 if (videoRef.current.paused) {
-                    videoRef.current.play().catch(err => {
-                        console.error('Video play error:', err.name, err.message);
+                    videoRef.current.play().catch((err) => {
+                        console.error('Video play error:', err);
                         clearTimeout(timeout);
                         reject(err);
                     });
@@ -501,6 +483,7 @@ export default function Chat() {
         });
     };
 
+    // Request permissions with retries
     const requestPermissions = async (retries = 3) => {
         for (let i = 0; i < retries; i++) {
             try {
@@ -508,45 +491,40 @@ export default function Chat() {
                 console.log('Requesting microphone permission...');
                 const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 console.log('Microphone stream:', audioStream.getAudioTracks());
-                audioStream.getTracks().forEach(track => track.stop());
-                console.log('Microphone permission granted.');
-
+                audioStream.getTracks().forEach((track) => track.stop());
                 if (mode === 'camera') {
                     console.log('Requesting camera permission...');
                     const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
                     console.log('Camera stream:', videoStream.getVideoTracks());
-                    videoStream.getTracks().forEach(track => track.stop());
-                    console.log('Camera permission granted.');
-                } else {
-                    console.log('No camera permission needed for desktop mode.');
+                    videoStream.getTracks().forEach((track) => track.stop());
                 }
-
-                setHasPermissions(true);
-                setStatus('Permissions granted successfully.');
-                console.log('hasPermissions set to true');
+                console.log('Permissions granted successfully');
                 return true;
             } catch (err) {
-                console.error(`Permission error (attempt ${i + 1} of ${retries}):`, err.name, err.message);
+                console.error(`Permission error (attempt ${i + 1}/${retries}):`, err);
                 if (i === retries - 1) {
                     if (err.name === 'NotAllowedError') {
-                        setStatus('Permissions denied. Please allow microphone and camera access in browser settings.');
+                        setStatus('Permissions denied. Please allow microphone and camera in browser settings.');
                     } else if (err.name === 'NotFoundError') {
-                        setStatus('No microphone or camera found. Please ensure devices are connected.');
+                        setStatus('No microphone or camera found. Ensure devices are connected.');
                     } else {
                         setStatus(`Permission error: ${err.message}`);
                     }
                     console.error('Final permission request failed:', err);
                     return false;
                 }
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise((resolve) => setTimeout(resolve, 1000));
             }
         }
         console.error('All permission request retries failed.');
         return false;
     };
 
+    // Main initialization
     useEffect(() => {
         isMounted.current = true;
+
+        // Initialize session ID
         let sessionId = localStorage.getItem('session_id');
         if (!sessionId) {
             sessionId = uuidv4();
@@ -554,6 +532,7 @@ export default function Chat() {
         }
         sessionIdRef.current = sessionId;
 
+        // Load chat history
         const savedHistory = localStorage.getItem(`chat_history_${sessionId}`);
         if (savedHistory) {
             const history = JSON.parse(savedHistory);
@@ -562,36 +541,37 @@ export default function Chat() {
         }
 
         const initializeApp = async () => {
+            if (isInitializing.current) {
+                console.log('Initialization already in progress, skipping...');
+                return;
+            }
+            isInitializing.current = true;
+
             console.log('Initializing app for mode:', mode);
-            await new Promise(resolve => setTimeout(resolve, 2000)); // MOBILE FIX 2025-06-14: Increased delay
             const permissionsGranted = await requestPermissions();
             if (!permissionsGranted) {
                 console.log('Permissions not granted, stopping initialization.');
+                isInitializing.current = false;
                 return;
             }
-            console.log('Permissions granted, starting stream.');
+
+            setHasPermissions(true);
             await startStream();
-            if (mode !== 'desktop') {
-                console.log('Calling initializeStream for camera mode.');
-                await initializeStream();
-            } else {
-                console.log('Skipping initializeStream for desktop mode.');
-            }
-            console.log('Setting up speech recognition.');
+            await initializeStream();
             setupSpeechRecognition();
+
+            isInitializing.current = false;
         };
 
-        const timer = setTimeout(() => {
-            if (isMounted.current) initializeApp();
-        }, 500);
+        if (isMounted.current) initializeApp();
 
         return () => {
             isMounted.current = false;
-            clearTimeout(timer);
             clearTimeout(recognitionTimeoutRef.current);
             hasInitializedStream.current = false;
+            isInitializing.current = false;
             if (recognitionRef.current) recognitionRef.current.stop();
-            if (streamRef.current) streamRef.current.getTracks().forEach(track => track.stop());
+            if (streamRef.current) streamRef.current.getTracks().forEach((track) => track.stop());
             window.speechSynthesis.cancel();
             canvasRef.current = null;
         };
@@ -620,30 +600,27 @@ export default function Chat() {
             return;
         }
         hasInitializedStream.current = true;
+
         try {
             console.log('Starting stream initialization for mode:', mode);
-
-            // Enumerate devices
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const videoDevices = devices.filter(device => device.kind === 'videoinput');
-            console.log('Available video devices:', videoDevices);
-
             if (streamRef.current) {
-                console.log('Stopping existing stream tracks.');
-                streamRef.current.getTracks().forEach(track => track.stop());
+                streamRef.current.getTracks().forEach((track) => track.stop());
                 streamRef.current = null;
             }
+
             let stream;
             if (mode === 'desktop' && !isMobile) {
                 const constraints = {
                     video: {
-                        displaySurface: 'monitor',
-                        logicalSurface: false,
-                        monitorTypeSurfaces: 'include',
                         width: { ideal: 1280 },
                         height: { ideal: 720 },
                         frameRate: { ideal: 10 },
                     },
+                };
+                console.log('Requesting screen share with constraints:', constraints);
+                stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+                console.log('Requesting microphone for desktop mode...');
+                const audioStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         echoCancellation: true,
                         noiseSuppression: true,
@@ -651,77 +628,51 @@ export default function Chat() {
                         sampleRate: 44100,
                         channelCount: 1,
                     },
-                };
-                console.log('Requesting screen share with constraints:', constraints);
-                stream = await navigator.mediaDevices.getDisplayMedia(constraints);
-                if (!stream.getAudioTracks().length) {
-                    console.warn('No audio track in desktop stream. Falling back to microphone.');
-                    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    audioStream.getAudioTracks().forEach(track => stream.addTrack(track));
-                }
-                console.log('Desktop audio track settings:', stream.getAudioTracks()[0]?.getSettings());
+                });
+                audioStream.getAudioTracks().forEach((track) => stream.addTrack(track));
             } else {
-                let constraints = {
-                    video: true, // MOBILE FIX 2025-06-14: Simplified for mobile
+                const constraints = {
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
                     audio: {
                         sampleRate: isMobile ? 16000 : 44100,
-                        echoCancellation: false, // Relaxed for mobile
-                        noiseSuppression: false,
-                        autoGainControl: false,
                     },
                 };
                 console.log('Requesting camera stream with constraints:', constraints);
                 try {
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    console.log('Camera stream acquired:', stream.getVideoTracks(), stream.getAudioTracks());
-                } catch (streamErr) {
-                    console.error('Failed to acquire camera stream:', streamErr.name, streamErr.message);
-                    console.log('Trying fallback constraints: { video: { width: 640, height: 480 }, audio: {...} }');
-                    constraints = {
+                } catch (err) {
+                    console.error('Initial stream failed:', err);
+                    console.log('Trying fallback constraints');
+                    const fallbackConstraints = {
                         video: { width: 640, height: 480 },
-                        audio: constraints.audio,
+                        audio: { sampleRate: 16000 },
                     };
-                    stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    console.log('Fallback camera stream acquired:', stream.getVideoTracks(), stream.getAudioTracks());
+                    stream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
                 }
-                console.log('Camera audio track settings:', stream.getAudioTracks()[0]?.getSettings());
             }
+
             streamRef.current = stream;
             if (videoRef.current) {
-                console.log('Assigning stream to video element.');
                 videoRef.current.srcObject = stream;
                 videoRef.current.muted = true;
                 videoRef.current.volume = 0;
                 videoRef.current.playsInline = true;
-                videoRef.current.autoplay = true;
                 try {
                     await videoRef.current.play();
-                    console.log('Video stream started successfully.');
-                } catch (playErr) {
-                    console.error('Video play error:', playErr.name, playErr.message);
-                    console.log('Retrying video playback after 1500ms...');
-                    await new Promise(resolve => setTimeout(resolve, 1500));
+                } catch (err) {
+                    console.error('Video play error:', err);
+                    await new Promise((resolve) => setTimeout(resolve, 1500));
                     await videoRef.current.play();
-                    console.log('Video stream started successfully after retry.');
                 }
             } else {
-                console.error('Video element not found.');
                 throw new Error('Video element not found');
             }
-            try {
-                await waitForVideo();
-                console.log('Video loaded successfully.');
-            } catch (waitErr) {
-                console.error('Wait for video error:', waitErr.name, waitErr.message);
-                setStatus('Failed to load video stream.');
-                throw waitErr;
-            }
+
+            await waitForVideo();
             canvasRef.current = document.createElement('canvas');
             setStatus('Stream initialized successfully');
-            console.log('Stream initialization complete, starting recognition.');
-            setTimeout(() => startRecognition(), 1000);
         } catch (err) {
-            console.error(`${mode} access error:`, err.name, err.message);
+            console.error(`${mode} access error:`, err);
             hasInitializedStream.current = false;
             setStatus(`Failed to access ${mode}: ${err.message}`);
         }
@@ -729,37 +680,38 @@ export default function Chat() {
 
     function setupSpeechRecognition() {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        console.log('SpeechRecognition supported:', !!SpeechRecognition);
         if (!SpeechRecognition) {
             setStatus('Speech recognition not supported. Use Chrome, Edge, or Safari.');
+            console.error('SpeechRecognition API not available');
             return;
         }
+
         recognitionRef.current = new SpeechRecognition();
-        recognitionRef.current.continuous = isMobile ? true : false; // MOBILE FIX 2025-06-14: Continuous for mobile
-        recognitionRef.current.interimResults = isMobile ? true : false;
-        recognitionRef.current.lang = isMobile ? navigator.language || 'en-US' : 'en-US'; // Fallback to device locale
-        if (isMobile) recognitionRef.current.maxAlternatives = 1;
+        recognitionRef.current.continuous = false;
+        recognitionRef.current.interimResults = isMobile;
+        recognitionRef.current.lang = navigator.language || 'en-US';
+        recognitionRef.current.maxAlternatives = 1;
 
         recognitionRef.current.onstart = () => {
             if (isMounted.current) {
-                console.log('Speech recognition started.');
+                console.log('Speech recognition started');
                 setIsRecognitionRunning(true);
                 setStatus('🎤 Listening for speech...');
-                if (isMobile) {
-                    recognitionTimeoutRef.current = setTimeout(() => {
-                        console.log('Speech recognition timeout, restarting...');
-                        recognitionRef.current?.stop();
-                    }, 8000); // MOBILE FIX 2025-06-14: Shorter timeout
-                }
+                recognitionTimeoutRef.current = setTimeout(() => {
+                    console.log('Speech recognition timeout, restarting...');
+                    recognitionRef.current?.stop();
+                }, 7000);
             }
         };
 
         recognitionRef.current.onresult = async (event) => {
-            console.log('Speech recognition result:', event.results);
             clearTimeout(recognitionTimeoutRef.current);
             if (isProcessing || !isMounted.current) return;
             setIsProcessing(true);
-            const prompt = event.results[event.results.length - 1][0].transcript.trim();
+
+            const result = event.results[event.results.length - 1];
+            if (!result.isFinal && !isMobile) return;
+            const prompt = result[0].transcript.trim();
             console.log('Recognized prompt:', prompt);
             if (!prompt) {
                 setStatus('Empty prompt detected.');
@@ -767,6 +719,7 @@ export default function Chat() {
                 if (isMounted.current) setTimeout(() => startRecognition(), 1000);
                 return;
             }
+
             setStatus(`Processing: ${prompt}`);
             let imageData = null;
             try {
@@ -776,24 +729,23 @@ export default function Chat() {
                 canvasRef.current.height = Math.min(videoRef.current?.videoHeight || 360, 360);
                 context.drawImage(videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height);
                 imageData = canvasRef.current.toDataURL('image/jpeg', isMobile ? 0.3 : 0.6);
-                console.log('Captured image data size:', imageData.length);
             } catch (err) {
                 console.error('Frame capture error:', err);
             }
+
             if (!imageData || imageData.length < 5000) {
-                console.warn('Invalid or empty image data captured.');
                 setStatus('Failed to capture valid frame.');
                 setIsProcessing(false);
                 if (isMounted.current) setTimeout(() => startRecognition(), 1000);
                 return;
             }
+
             try {
                 const maxRetries = 3;
                 let retries = 0;
                 let data;
                 while (retries < maxRetries) {
                     try {
-                        console.log('Sending API request to /api/process-audio');
                         const res = await fetch('/api/process-audio', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -807,15 +759,15 @@ export default function Chat() {
                         });
                         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
                         data = await res.json();
-                        console.log('API response:', data);
                         break;
                     } catch (err) {
                         retries++;
                         console.error(`API retry ${retries}/${maxRetries}:`, err);
                         if (retries === maxRetries) throw err;
-                        await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+                        await new Promise((resolve) => setTimeout(resolve, 1000 * retries));
                     }
                 }
+
                 if (data.error) {
                     setStatus(data.error);
                     if (isMounted.current) setTimeout(() => startRecognition(), 1000);
@@ -829,20 +781,17 @@ export default function Chat() {
                         const utterance = new SpeechSynthesisUtterance(data.response);
                         utterance.lang = 'en-US';
                         utterance.volume = 0.8;
-                        utterance.rate = isMobile ? 1.0 : 1.1;
+                        utterance.rate = 1.0;
                         utterance.pitch = 1.0;
                         utterance.onend = () => {
-                            if (isMounted.current) {
-                                setTimeout(() => startRecognition(), isMobile ? 1500 : 1000);
-                            }
-                        };
-                        utterance.onerror = (e) => {
-                            console.error('Speech synthesis error:', e);
                             if (isMounted.current) {
                                 setTimeout(() => startRecognition(), 1000);
                             }
                         };
-                        console.log('Speaking response:', data.response);
+                        utterance.onerror = (e) => {
+                            console.error('Speech synthesis error:', e);
+                            if (isMounted.current) setTimeout(() => startRecognition(), 1000);
+                        };
                         window.speechSynthesis.speak(utterance);
                     }, 200);
                 }
@@ -862,6 +811,7 @@ export default function Chat() {
                 setIsRecognitionRunning(false);
                 if (event.error === 'not-allowed') {
                     setStatus('Microphone access denied. Please allow microphone access.');
+                    setHasPermissions(false);
                 } else if (event.error === 'network') {
                     setStatus('Network error. Check your internet connection.');
                 } else {
@@ -872,47 +822,43 @@ export default function Chat() {
 
         recognitionRef.current.onend = () => {
             clearTimeout(recognitionTimeoutRef.current);
-            console.log('Speech recognition ended.');
             if (isMounted.current) {
+                console.log('Speech recognition ended');
                 setIsRecognitionRunning(false);
                 if (mode && !isProcessing && !isRecognitionScheduled.current && hasPermissions) {
                     isRecognitionScheduled.current = true;
                     setTimeout(() => {
                         isRecognitionScheduled.current = false;
                         startRecognition();
-                    }, isMobile ? 1500 : 1000);
+                    }, 1000);
                 }
             }
         };
 
-        if (hasPermissions) {
-            console.log('hasPermissions is true, scheduling startRecognition.');
-            setTimeout(() => startRecognition(), 1000);
-        }
+        startRecognition();
     }
 
     function startRecognition() {
-        if (recognitionRef.current && !isRecognitionRunning && !isProcessing && isMounted.current && !isRecognitionScheduled.current && hasPermissions) {
-            try {
-                console.log('Starting speech recognition...');
-                recognitionRef.current.start();
-                setIsRecognitionRunning(true);
-                setStatus('🎤 Listening for speech...');
-            } catch (e) {
-                console.error('Recognition start error:', e);
-                setStatus(`Failed to start recognition: ${e.message}`);
-                setIsRecognitionRunning(false);
-                setTimeout(() => startRecognition(), 2000);
-            }
-        } else {
+        if (!recognitionRef.current || isRecognitionRunning || isProcessing || !isMounted.current || !hasPermissions) {
             console.log('Cannot start recognition:', {
                 hasRecognition: !!recognitionRef.current,
                 isRecognitionRunning,
                 isProcessing,
                 isMounted: isMounted.current,
-                isRecognitionScheduled: isRecognitionScheduled.current,
-                hasPermissions
+                hasPermissions,
             });
+            return;
+        }
+        try {
+            console.log('Starting speech recognition...');
+            recognitionRef.current.start();
+            setIsRecognitionRunning(true);
+            setStatus('🎤 Listening for speech...');
+        } catch (e) {
+            console.error('Recognition start error:', e);
+            setStatus(`Failed to start recognition: ${e.message}`);
+            setIsRecognitionRunning(false);
+            setTimeout(() => startRecognition(), 2000);
         }
     }
 
@@ -924,7 +870,7 @@ export default function Chat() {
             setIsRecognitionRunning(false);
         }
         if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current.getTracks().forEach((track) => track.stop());
             streamRef.current = null;
         }
         try {
@@ -951,21 +897,9 @@ export default function Chat() {
         const granted = await requestPermissions();
         if (granted) {
             setHasPermissions(true);
-            console.log('Permissions granted, initializing stream...');
-            if (mode !== 'desktop') {
-                console.log('Triggering initializeStream for camera mode.');
-                await initializeStream();
-            }
-            console.log('Calling setupSpeechRecognition.');
+            await initializeStream();
             setupSpeechRecognition();
-            setTimeout(() => startRecognition(), 1000);
         }
-    };
-
-    const handleStartScreenShare = async () => {
-        console.log('Starting screen share.');
-        await initializeStream();
-        setShowScreenSharePrompt(false);
     };
 
     return (
@@ -990,17 +924,6 @@ export default function Chat() {
             {mode === 'camera' && hasPermissions && !isRecognitionRunning && !status && (
                 <div className="mb-6 p-4 bg-blue-600 bg-opacity-70 rounded-lg text-center">
                     <p>Initializing camera stream...</p>
-                </div>
-            )}
-            {showScreenSharePrompt && mode === 'desktop' && hasPermissions && (
-                <div className="mb-6 p-4 bg-blue-600 bg-opacity-70 rounded-lg text-center">
-                    <p className="mb-2">Select a screen to share</p>
-                    <button
-                        onClick={handleStartScreenShare}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-                    >
-                        Start Screen Sharing
-                    </button>
                 </div>
             )}
             <div className="mb-6">
@@ -1045,14 +968,24 @@ export default function Chat() {
                 )}
             </div>
             <div className="mt-4 text-center">
-                <div className={`inline-block px-3 py-1 rounded-full text-sm ${isRecognitionRunning ? 'bg-green-600' :
-                        isProcessing ? 'bg-yellow-600' :
-                            hasPermissions ? 'bg-blue-600' : 'bg-red-600'
-                    }`}>
+                <div
+                    className={`inline-block px-3 py-1 rounded-full text-sm ${isRecognitionRunning
+                            ? 'bg-green-600'
+                            : isProcessing
+                                ? 'bg-yellow-600'
+                                : hasPermissions
+                                    ? 'bg-blue-600'
+                                    : 'bg-red-600'
+                        }`}
+                >
                     {status || (hasPermissions ? 'Ready' : 'Waiting for permissions')}
                 </div>
             </div>
-            {isProcessing && <div className="text-center mt-2">Processing... <span className="animate-spin">⏳</span></div>}
+            {isProcessing && (
+                <div className="text-center mt-2">
+                    Processing... <span className="animate-spin">⏳</span>
+                </div>
+            )}
         </div>
     );
 }
