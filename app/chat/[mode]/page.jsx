@@ -1785,6 +1785,16 @@ export default function Chat() {
 
             <div className="flex justify-center space-x-4 flex-wrap">
                 <button
+                    onClick={async () => {
+                        hasInitializedStream.current = false;
+                        await initializeStream();
+                        setupSpeechRecognition();
+                    }}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2"
+                >
+                    Reinitialize Stream
+                </button>
+                <button
                     onClick={stopStream}
                     className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-300 mb-2"
                 >
