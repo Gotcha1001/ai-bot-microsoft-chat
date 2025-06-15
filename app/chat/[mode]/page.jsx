@@ -1171,91 +1171,45 @@ export default function Chat() {
         });
     };
 
-    // const requestPermissions = async (retries = 3) => {
-    //     for (let i = 0; i < retries; i++) {
-    //         try {
-    //             setStatus(`🔐 Requesting permissions (${i + 1}/${retries})...`);
-    //             console.log('Requesting microphone permission...');
-
-    //             const audioConstraints = {
-    //                 audio: {
-    //                     echoCancellation: true,
-    //                     noiseSuppression: true,
-    //                     autoGainControl: true,
-    //                     sampleRate: isMobile ? 16000 : 44100,
-    //                     channelCount: 1,
-    //                 }
-    //             };
-
-    //             const audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
-    //             console.log('Microphone stream obtained:', audioStream.getAudioTracks());
-
-    //             const audioTracks = audioStream.getAudioTracks();
-    //             if (audioTracks.length === 0) {
-    //                 throw new Error('No audio tracks available');
-    //             }
-
-    //             const track = audioTracks[0];
-    //             if (track.readyState !== 'live') {
-    //                 throw new Error('Audio track not ready');
-    //             }
-
-    //             let videoStream = null;
-    //             if (mode === 'camera') {
-    //                 console.log('Requesting camera permission...');
-    //                 const videoConstraints = {
-    //                     video: {
-    //                         width: { ideal: isMobile ? 640 : 1280 },
-    //                         height: { ideal: isMobile ? 480 : 720 },
-    //                         facingMode: 'user',
-    //                     }
-    //                 };
-    //                 videoStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
-    //                 console.log('Camera stream obtained:', videoStream.getVideoTracks());
-    //                 if (videoStream.getVideoTracks().length === 0) {
-    //                     throw new Error('No video tracks available');
-    //                 }
-    //                 videoStream.getTracks().forEach((track) => track.stop());
-    //             }
-
-    //             audioStream.getTracks().forEach((track) => track.stop());
-    //             console.log('All permissions granted successfully');
-    //             return true;
-    //         } catch (err) {
-    //             console.error(`Permission error (attempt ${i + 1}/${retries}):`, err);
-    //             if (i === retries - 1) {
-    //                 if (err.name === 'NotAllowedError') {
-    //                     setStatus('❌ Permissions denied. Please allow microphone and camera access.');
-    //                 } else if (err.name === 'NotFoundError') {
-    //                     setStatus('❌ No microphone or camera found. Please connect a device.');
-    //                 } else if (err.name === 'NotReadableError') {
-    //                     setStatus('❌ Microphone or camera in use by another app. Close other apps.');
-    //                 } else {
-    //                     setStatus(`❌ Permission error: ${err.message}`);
-    //                 }
-    //                 return false;
-    //             }
-    //             await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
-    //         }
-    //     }
-    //     return false;
-    // };
-
-
     const requestPermissions = async (retries = 3) => {
         for (let i = 0; i < retries; i++) {
             try {
                 setStatus(`🔐 Requesting permissions (${i + 1}/${retries})...`);
                 console.log('Requesting microphone permission...');
 
-                const audioConstraints = { audio: true };
+                const audioConstraints = {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: isMobile ? 16000 : 44100,
+                        channelCount: 1,
+                    },
+                };
+
                 const audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
                 console.log('Microphone stream obtained:', audioStream.getAudioTracks());
+
+                const audioTracks = audioStream.getAudioTracks();
+                if (audioTracks.length === 0) {
+                    throw new Error('No audio tracks available');
+                }
+
+                const track = audioTracks[0];
+                if (track.readyState !== 'live') {
+                    throw new Error('Audio track not ready');
+                }
 
                 let videoStream = null;
                 if (mode === 'camera') {
                     console.log('Requesting camera permission...');
-                    const videoConstraints = { video: true }; // Simplified constraint
+                    const videoConstraints = {
+                        video: {
+                            width: { ideal: isMobile ? 640 : 1280 },
+                            height: { ideal: isMobile ? 480 : 720 },
+                            facingMode: 'user',
+                        },
+                    };
                     videoStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
                     console.log('Camera stream obtained:', videoStream.getVideoTracks());
                     if (videoStream.getVideoTracks().length === 0) {
@@ -1271,7 +1225,7 @@ export default function Chat() {
                 console.error(`Permission error (attempt ${i + 1}/${retries}):`, err);
                 if (i === retries - 1) {
                     if (err.name === 'NotAllowedError') {
-                        setStatus('❌ Permissions denied. Please allow microphone and camera access.');
+                        setStatus('❌ Permissions denied. Please allow microphone and camera access in your browser settings.');
                     } else if (err.name === 'NotFoundError') {
                         setStatus('❌ No microphone or camera found. Please connect a device.');
                     } else if (err.name === 'NotReadableError') {
@@ -1492,12 +1446,10 @@ export default function Chat() {
         };
 
         recognitionRef.current.onend = () => {
-            console.log('Speech recognition ended');
-            if (recognitionTimeoutRef.current) {
-                clearTimeout(recognitionTimeoutRef.current);
-            }
+            clearTimeout(recognitionTimeoutRef.current);
             if (isMounted.current) {
-                setIsRecognitionRunning(false);
+                console.log('Speech recognition ended');
+                setIsRecognitionRunning(false); // Ensure this is called
                 if (!isProcessing && !isRecognitionScheduled.current) {
                     isRecognitionScheduled.current = true;
                     setTimeout(() => {
@@ -1547,6 +1499,12 @@ export default function Chat() {
             console.log('Starting stream initialization for mode:', mode);
             setStatus('📷 Initializing camera and microphone...');
 
+            if (!hasPermissions) {
+                const granted = await requestPermissions();
+                if (!granted) throw new Error('Permissions not granted');
+                setHasPermissions(true);
+            }
+
             if (streamRef.current) {
                 streamRef.current.getTracks().forEach((track) => track.stop());
                 streamRef.current = null;
@@ -1586,7 +1544,7 @@ export default function Chat() {
                         autoGainControl: true,
                         sampleRate: isMobile ? 16000 : 44100,
                         channelCount: 1,
-                    }
+                    },
                 };
                 try {
                     stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -1634,59 +1592,25 @@ export default function Chat() {
             console.log('Stream initialization complete');
         } catch (err) {
             console.error(`Stream initialization error:`, err);
-            hasInitializedStream.current = false; // Reset to allow reinitialization
+            hasInitializedStream.current = false;
             setStatus(`❌ Failed to access ${mode}: ${err.message}`);
             setHasPermissions(false);
         }
     }
 
-    // function startRecognition() {
-    //     if (!recognitionRef.current || isRecognitionRunning || isProcessing || !isMounted.current || !hasPermissions) {
-    //         console.log('Cannot start recognition:', {
-    //             hasRecognition: !!recognitionRef.current,
-    //             isRecognitionRunning,
-    //             isProcessing,
-    //             isMounted: isMounted.current,
-    //             hasPermissions,
-    //         });
-    //         return;
-    //     }
-
-    //     try {
-    //         console.log('Starting speech recognition...');
-    //         if (document.hidden) {
-    //             console.log('Page is hidden, delaying recognition start');
-    //             setTimeout(() => startRecognition(), 2000);
-    //             return;
-    //         }
-    //         recognitionRef.current.start();
-    //     } catch (e) {
-    //         console.error('Recognition start error:', e);
-    //         if (e.name === 'InvalidStateError') {
-    //             console.log('Recognition already running, stopping first...');
-    //             recognitionRef.current.stop();
-    //             setTimeout(() => startRecognition(), 1000);
-    //         } else {
-    //             setStatus(`❌ Failed to start recognition: ${e.message}`);
-    //             setIsRecognitionRunning(false);
-    //             setTimeout(() => startRecognition(), 2000);
-    //         }
-    //     }
-    // }
-
     function startRecognition() {
-        if (!recognitionRef.current || isRecognitionRunning || isProcessing || !isMounted.current || !hasPermissions) {
+        if (!recognitionRef.current || isProcessing || !isMounted.current || !hasPermissions) {
             setStatus(`Cannot start recognition: {
-            hasRecognition: ${!!recognitionRef.current},
-            isRecognitionRunning: ${isRecognitionRunning},
-            isProcessing: ${isProcessing},
-            isMounted: ${isMounted.current},
-            hasPermissions: ${hasPermissions}
-        }`);
+                hasRecognition: ${!!recognitionRef.current},
+                isRecognitionRunning: ${isRecognitionRunning},
+                isProcessing: ${isProcessing},
+                isMounted: ${isMounted.current},
+                hasPermissions: ${hasPermissions}
+            }`);
             return;
         }
         try {
-            console.log('Starting speech recognition...'); // Remove or replace with UI log if needed
+            setIsRecognitionRunning(false); // Force reset before starting
             if (document.hidden) {
                 setStatus('Page is hidden, delaying recognition...');
                 setTimeout(() => startRecognition(), 2000);
@@ -1752,7 +1676,7 @@ export default function Chat() {
             hasPermissions,
             isRecognitionRunning,
             isProcessing,
-            browserWarning
+            browserWarning,
         };
         console.log('Debug Info:', debugInfo);
         alert(JSON.stringify(debugInfo, null, 2));
