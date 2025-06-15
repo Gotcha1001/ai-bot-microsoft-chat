@@ -1171,45 +1171,91 @@ export default function Chat() {
         });
     };
 
+    // const requestPermissions = async (retries = 3) => {
+    //     for (let i = 0; i < retries; i++) {
+    //         try {
+    //             setStatus(`🔐 Requesting permissions (${i + 1}/${retries})...`);
+    //             console.log('Requesting microphone permission...');
+
+    //             const audioConstraints = {
+    //                 audio: {
+    //                     echoCancellation: true,
+    //                     noiseSuppression: true,
+    //                     autoGainControl: true,
+    //                     sampleRate: isMobile ? 16000 : 44100,
+    //                     channelCount: 1,
+    //                 }
+    //             };
+
+    //             const audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+    //             console.log('Microphone stream obtained:', audioStream.getAudioTracks());
+
+    //             const audioTracks = audioStream.getAudioTracks();
+    //             if (audioTracks.length === 0) {
+    //                 throw new Error('No audio tracks available');
+    //             }
+
+    //             const track = audioTracks[0];
+    //             if (track.readyState !== 'live') {
+    //                 throw new Error('Audio track not ready');
+    //             }
+
+    //             let videoStream = null;
+    //             if (mode === 'camera') {
+    //                 console.log('Requesting camera permission...');
+    //                 const videoConstraints = {
+    //                     video: {
+    //                         width: { ideal: isMobile ? 640 : 1280 },
+    //                         height: { ideal: isMobile ? 480 : 720 },
+    //                         facingMode: 'user',
+    //                     }
+    //                 };
+    //                 videoStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
+    //                 console.log('Camera stream obtained:', videoStream.getVideoTracks());
+    //                 if (videoStream.getVideoTracks().length === 0) {
+    //                     throw new Error('No video tracks available');
+    //                 }
+    //                 videoStream.getTracks().forEach((track) => track.stop());
+    //             }
+
+    //             audioStream.getTracks().forEach((track) => track.stop());
+    //             console.log('All permissions granted successfully');
+    //             return true;
+    //         } catch (err) {
+    //             console.error(`Permission error (attempt ${i + 1}/${retries}):`, err);
+    //             if (i === retries - 1) {
+    //                 if (err.name === 'NotAllowedError') {
+    //                     setStatus('❌ Permissions denied. Please allow microphone and camera access.');
+    //                 } else if (err.name === 'NotFoundError') {
+    //                     setStatus('❌ No microphone or camera found. Please connect a device.');
+    //                 } else if (err.name === 'NotReadableError') {
+    //                     setStatus('❌ Microphone or camera in use by another app. Close other apps.');
+    //                 } else {
+    //                     setStatus(`❌ Permission error: ${err.message}`);
+    //                 }
+    //                 return false;
+    //             }
+    //             await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)));
+    //         }
+    //     }
+    //     return false;
+    // };
+
+
     const requestPermissions = async (retries = 3) => {
         for (let i = 0; i < retries; i++) {
             try {
                 setStatus(`🔐 Requesting permissions (${i + 1}/${retries})...`);
                 console.log('Requesting microphone permission...');
 
-                const audioConstraints = {
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                        sampleRate: isMobile ? 16000 : 44100,
-                        channelCount: 1,
-                    }
-                };
-
+                const audioConstraints = { audio: true };
                 const audioStream = await navigator.mediaDevices.getUserMedia(audioConstraints);
                 console.log('Microphone stream obtained:', audioStream.getAudioTracks());
-
-                const audioTracks = audioStream.getAudioTracks();
-                if (audioTracks.length === 0) {
-                    throw new Error('No audio tracks available');
-                }
-
-                const track = audioTracks[0];
-                if (track.readyState !== 'live') {
-                    throw new Error('Audio track not ready');
-                }
 
                 let videoStream = null;
                 if (mode === 'camera') {
                     console.log('Requesting camera permission...');
-                    const videoConstraints = {
-                        video: {
-                            width: { ideal: isMobile ? 640 : 1280 },
-                            height: { ideal: isMobile ? 480 : 720 },
-                            facingMode: 'user',
-                        }
-                    };
+                    const videoConstraints = { video: true }; // Simplified constraint
                     videoStream = await navigator.mediaDevices.getUserMedia(videoConstraints);
                     console.log('Camera stream obtained:', videoStream.getVideoTracks());
                     if (videoStream.getVideoTracks().length === 0) {
@@ -1229,7 +1275,7 @@ export default function Chat() {
                     } else if (err.name === 'NotFoundError') {
                         setStatus('❌ No microphone or camera found. Please connect a device.');
                     } else if (err.name === 'NotReadableError') {
-                        setStatus('❌ Microphone or camera in use by another app. Close other apps.');
+                        setStatus('❌ Microphone or camera in use or not accessible. Restart device or check settings.');
                     } else {
                         setStatus(`❌ Permission error: ${err.message}`);
                     }
